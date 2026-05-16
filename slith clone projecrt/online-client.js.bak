@@ -1,0 +1,528 @@
+// ═══════════════════════════════════════════════════════════════
+// CONFIG & GLOBALS
+// ═══════════════════════════════════════════════════════════════
+console.log("online-client.js version 2.1.0 — Orbioo Spatial Grid + Debug loaded");
+const CFG = {
+    WORLD_W:     4000,
+    WORLD_H:     4000,
+    MINIMAP_SIZE: 120,
+    SECTOR_SIZE:  250,  // Must match server CFG.SECTOR_SIZE
+};
+
+const SKINS = {
+    'neon-blue': { colors: ['#00f3ff', '#0099ff'], glow: '#00f3ff' },
+    'classic-green': { colors: ['#39ff14', '#00cc00'], glow: '#39ff14' },
+    'striped': { colors: ['#ff0090', '#ff6600'], glow: '#ff0090', striped: true },
+};
+
+let client, room;
+let canvas, ctx, mmCanvas, mmCtx;
+let gameRunning = false;
+let animId;
+let mouse = { x: 0, y: 0 };
+let boosting = false;
+let selectedSkin = 'neon-blue';
+let playerName = 'Player';
+
+// Game State
+let snakes      = new Map();  // sessionId → Snake schema object
+let visualSnakes = new Map();  // sessionId → Interpolated snake state
+let foods       = new Map();  // foodId    → { x, y, color, radius }
+let foodsBySector = new Map(); // sectorKey → [foodId, foodId, ...]
+let mySessionId = null;
+
+// ═══════════════════════════════════════════════════════════════
+// UI & MENU
+// ═══════════════════════════════════════════════════════════════
+function selectSkin(el, skin) {
+    document.querySelectorAll('.skin-card').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    selectedSkin = skin;
+}
+
+function showMenu() {
+    cancelAnimationFrame(animId);
+    gameRunning = false;
+    if (room) {
+        room.leave();
+        room = null;
+    }
+    document.getElementById('deathScreen').style.display = 'none';
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('leaderboard').style.display = 'none';
+    document.getElementById('minimap').style.display = 'none';
+    document.getElementById('boostIndicator').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex';
+}
+
+function showDeathScreen(score, length, startTime) {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+
+    document.getElementById('deathStats').innerHTML = `
+    <div>Score: <strong>${score}</strong></div>
+    <div>Length: <strong>${length}</strong></div>
+    <div>Survived: <strong>${mins}m ${secs}s</strong></div>
+  `;
+
+    setTimeout(() => {
+        document.getElementById('deathScreen').style.display = 'flex';
+    }, 800);
+}
+
+function restartGame() {
+    document.getElementById('deathScreen').style.display = 'none';
+    if (room) {
+        room.send('respawn');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT & CONNECTION
+// ═══════════════════════════════════════════════════════════════
+async function startGame() {
+    playerName = document.getElementById('playerName').value.trim() || 'Player';
+
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    document.getElementById('leaderboard').style.display = 'block';
+    document.getElementById('minimap').style.display = 'block';
+    document.getElementById('boostIndicator').style.display = 'block';
+    document.getElementById('deathScreen').style.display = 'none';
+    document.getElementById('debugOverlay').style.display = 'flex';
+
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    mmCanvas = document.getElementById('minimapCanvas');
+    mmCtx = mmCanvas.getContext('2d');
+
+    resize();
+    window.addEventListener('resize', resize);
+    setupInput();
+
+    snakes.clear();
+    foods.clear();
+    foodsBySector.clear();
+
+    const startTime = Date.now();
+
+    try {
+        const host = window.location.hostname;
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const serverUrl = `${protocol}://${host}:2567`;
+        
+        console.log(`Connecting to Colyseus server at ${serverUrl}...`);
+        if (typeof window.Colyseus === 'undefined') {
+            throw new Error("Colyseus SDK is not loaded. Please refresh the page.");
+        }
+        client = new window.Colyseus.Client(serverUrl);
+        
+        console.log("Attempting to join or create 'slither' room...");
+        room = await client.joinOrCreate('slither', {
+            name: playerName,
+            skin: selectedSkin
+        });
+
+        console.log("Successfully joined room:", room.name, "ID:", room.roomId);
+        mySessionId = room.sessionId;
+
+        // ── State Synchronization (Orbioo-Style) ─────────────────────────────
+        room.onStateChange((state) => {
+
+            // 1. Sync Snakes (incremental diff)
+            if (state.snakes) {
+                for (let id of snakes.keys()) {
+                    if (!state.snakes.has(id)) snakes.delete(id);
+                }
+                state.snakes.forEach((snake, id) => snakes.set(id, snake));
+            }
+
+            // 2. Sync Food via Binary Sector Grid
+            // Each sector's "d" field is a Base64 binary string: [relX, relY, hue/2] per food.
+            if (state.grid) {
+                state.grid.forEach((sector, key) => {
+                    const [cxStr, cyStr] = key.split(',');
+                    const sectorX = parseInt(cxStr) * CFG.SECTOR_SIZE;
+                    const sectorY = parseInt(cyStr) * CFG.SECTOR_SIZE;
+
+                    // Remove all old food for this sector
+                    const oldIds = foodsBySector.get(key);
+                    if (oldIds) oldIds.forEach(id => foods.delete(id));
+                    foodsBySector.set(key, []);
+
+                    // Decode Base64 → Uint8Array → food dots
+                    if (!sector.d || sector.d.length === 0) return;
+
+                    try {
+                        const binary = atob(sector.d);
+                        const bytes  = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+                        const newIds = [];
+                        for (let i = 0; i + 2 < bytes.length; i += 3) {
+                            const fx  = sectorX + bytes[i];
+                            const fy  = sectorY + bytes[i + 1];
+                            const hue = bytes[i + 2] * 2;
+                            const id  = `${key}_${i}`;
+                            foods.set(id, {
+                                x:      fx,
+                                y:      fy,
+                                color:  `hsl(${hue},100%,60%)`,
+                                radius: 5
+                            });
+                            newIds.push(id);
+                        }
+                        foodsBySector.set(key, newIds);
+                    } catch (e) {
+                        console.warn('[Sector Decode Error]', key, e);
+                    }
+                });
+            }
+        });
+
+        room.onMessage('player_died', (msg) => {
+            if (msg.sessionId === mySessionId) {
+                const mySnake = snakes.get(mySessionId);
+                showDeathScreen(mySnake?.score || 0, mySnake?.segments.length || 0, startTime);
+            }
+        });
+
+        gameRunning = true;
+        gameLoop();
+
+    } catch (e) {
+        console.error("Join error:", e);
+        alert("Failed to connect to server! Error: " + e.message);
+        showMenu();
+    }
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INPUT
+// ═══════════════════════════════════════════════════════════════
+function setupInput() {
+    canvas.addEventListener('mousemove', e => {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+    });
+
+    canvas.addEventListener('mousedown', () => { boosting = true; });
+    canvas.addEventListener('mouseup', () => { boosting = false; });
+
+    window.addEventListener('keydown', e => {
+        if (e.code === 'Space') { e.preventDefault(); boosting = true; }
+    });
+    window.addEventListener('keyup', e => {
+        if (e.code === 'Space') { boosting = false; }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════
+function drawGrid(camX, camY) {
+    const gridSize = 60;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,243,255,0.035)';
+    ctx.lineWidth = 1;
+
+    const startX = -camX % gridSize;
+    const startY = -camY % gridSize;
+
+    for (let x = startX; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = startY; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = 'rgba(0,243,255,0.5)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#00f3ff';
+    ctx.shadowBlur = 20;
+    ctx.strokeRect(-camX, -camY, CFG.WORLD_W, CFG.WORLD_H);
+    ctx.restore();
+}
+
+function lerpColor(a, b, t) {
+    const ah = parseInt(a.replace('#', ''), 16);
+    const bh = parseInt(b.replace('#', ''), 16);
+    const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+    const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return `rgb(${r},${g},${bl})`;
+}
+
+function drawSnake(snake, camX, camY) {
+    if (!snake.alive || snake.segments.length < 2) return;
+
+    const skin = SKINS[snake.skin] || SKINS['neon-blue'];
+    const seg = snake.segments;
+    const w = snake.width;
+
+    ctx.save();
+    ctx.shadowColor = skin.glow;
+    ctx.shadowBlur = snake.boosting ? 30 : 15;
+
+    for (let i = seg.length - 1; i > 0; i--) {
+        const t = i / seg.length;
+        const sw = w * (0.5 + 0.5 * (1 - t * 0.5));
+
+        let col;
+        if (skin.striped) {
+            const even = Math.floor(i / 6) % 2 === 0;
+            col = even ? skin.colors[0] : skin.colors[1];
+        } else {
+            col = lerpColor(skin.colors[1], skin.colors[0], 1 - t);
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(seg[i].x - camX, seg[i].y - camY);
+        ctx.lineTo(seg[i - 1].x - camX, seg[i - 1].y - camY);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = sw;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(seg[0].x - camX, seg[0].y - camY, w * 0.65, 0, Math.PI * 2);
+    ctx.fillStyle = skin.colors[0];
+    ctx.shadowBlur = 25;
+    ctx.fill();
+
+    const eyeOffset = w * 0.35;
+    const eyeAngle1 = snake.angle - 0.6;
+    const eyeAngle2 = snake.angle + 0.6;
+    const eyeRadius = w * 0.18;
+
+    for (const ea of [eyeAngle1, eyeAngle2]) {
+        const ex = seg[0].x - camX + Math.cos(ea) * eyeOffset;
+        const ey = seg[0].y - camY + Math.sin(ea) * eyeOffset;
+        ctx.beginPath();
+        ctx.arc(ex, ey, eyeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.shadowBlur = 0;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(ex + Math.cos(snake.angle) * eyeRadius * 0.4,
+            ey + Math.sin(snake.angle) * eyeRadius * 0.4,
+            eyeRadius * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#000';
+        ctx.fill();
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.font = `bold ${Math.max(10, w * 0.8)}px Rajdhani`;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.textAlign = 'center';
+    ctx.fillText(snake.name, seg[0].x - camX, seg[0].y - camY - w - 6);
+
+    ctx.restore();
+}
+
+function drawFood(f, camX, camY) {
+    const screenX = f.x - camX;
+    const screenY = f.y - camY;
+    if (screenX < -30 || screenX > canvas.width + 30 || screenY < -30 || screenY > canvas.height + 30) return;
+
+    const r = f.radius;
+
+    ctx.save();
+    ctx.shadowColor = f.color;
+    ctx.shadowBlur = r + 7;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, r, 0, Math.PI * 2);
+    ctx.fillStyle = f.color;
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, r * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawMinimap() {
+    const ms = CFG.MINIMAP_SIZE;
+    const sx = ms / CFG.WORLD_W;
+    const sy = ms / CFG.WORLD_H;
+
+    mmCtx.fillStyle = 'rgba(5,10,15,0.9)';
+    mmCtx.fillRect(0, 0, ms, ms);
+
+    foods.forEach(f => {
+        mmCtx.fillStyle = f.color;
+        mmCtx.fillRect(f.x * sx - 1, f.y * sy - 1, 2, 2);
+    });
+
+    snakes.forEach((s, sid) => {
+        if (!s.alive) return;
+        if (sid === mySessionId) {
+            mmCtx.fillStyle = '#fff';
+            mmCtx.shadowColor = '#fff';
+            mmCtx.shadowBlur = 6;
+            mmCtx.beginPath();
+            mmCtx.arc(s.segments[0].x * sx, s.segments[0].y * sy, 3, 0, Math.PI * 2);
+            mmCtx.fill();
+            mmCtx.shadowBlur = 0;
+        } else {
+            const skin = SKINS[s.skin] || SKINS['neon-blue'];
+            mmCtx.fillStyle = skin.colors[0];
+            mmCtx.fillRect(s.segments[0].x * sx - 2, s.segments[0].y * sy - 2, 4, 4);
+        }
+    });
+}
+
+function updateLeaderboard() {
+    const entries = [];
+    snakes.forEach((s, sid) => {
+        if (s.alive) {
+            entries.push({ name: s.name, len: s.segments.length, isYou: sid === mySessionId });
+        }
+    });
+    entries.sort((a, b) => b.len - a.len);
+
+    const el = document.getElementById('lbEntries');
+    el.innerHTML = entries.slice(0, 6).map((e, i) => `
+    <div class="lb-entry ${e.isYou ? 'you' : ''}">
+      <span><span class="lb-rank">${i + 1}.</span>${e.name}</span>
+      <span>${e.len}</span>
+    </div>
+  `).join('');
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function updateVisuals() {
+    const LERP_FACTOR = 0.2;
+    snakes.forEach((sync, id) => {
+        let vis = visualSnakes.get(id);
+        if (!vis) {
+            vis = {
+                id,
+                x: sync.x,
+                y: sync.y,
+                angle: sync.angle,
+                width: sync.width,
+                name: sync.name,
+                skin: sync.skin,
+                boosting: sync.boosting,
+                segments: sync.segments.map(s => ({ x: s.x, y: s.y }))
+            };
+            visualSnakes.set(id, vis);
+        }
+
+        vis.x = lerp(vis.x, sync.x, LERP_FACTOR);
+        vis.y = lerp(vis.y, sync.y, LERP_FACTOR);
+
+        let da = sync.angle - vis.angle;
+        while (da > Math.PI) da -= Math.PI * 2;
+        while (da < -Math.PI) da += Math.PI * 2;
+        vis.angle += da * LERP_FACTOR;
+
+        if (vis.segments.length !== sync.segments.length) {
+            vis.segments = sync.segments.map((s, i) => vis.segments[i] ? { x: vis.segments[i].x, y: vis.segments[i].y } : { x: s.x, y: s.y });
+        }
+
+        for (let i = 0; i < vis.segments.length; i++) {
+            vis.segments[i].x = lerp(vis.segments[i].x, sync.segments[i].x, LERP_FACTOR);
+            vis.segments[i].y = lerp(vis.segments[i].y, sync.segments[i].y, LERP_FACTOR);
+        }
+
+        vis.boosting = sync.boosting;
+        vis.alive = sync.alive;
+        vis.width = sync.width;
+    });
+
+    for (let id of visualSnakes.keys()) if (!snakes.has(id)) visualSnakes.delete(id);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GAME LOOP
+// ═══════════════════════════════════════════════════════════════
+function gameLoop() {
+    if (!gameRunning) return;
+    animId = requestAnimationFrame(gameLoop);
+
+    const mySnake = snakes.get(mySessionId);
+    
+    // Send input
+    if (mySnake && mySnake.alive && room) {
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        const targetAngle = Math.atan2(mouse.y - cy, mouse.x - cx);
+        room.send('input', { angle: targetAngle, boosting });
+    }
+
+    updateVisuals();
+    const visPlayer = visualSnakes.get(mySessionId);
+
+    // Rendering
+    ctx.fillStyle = '#050a0f';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const hasSegments = visPlayer && visPlayer.segments && visPlayer.segments.length > 0;
+
+    const camX = (visPlayer && hasSegments)
+        ? visPlayer.segments[0].x - canvas.width / 2
+        : CFG.WORLD_W / 2 - canvas.width / 2;
+    const camY = (visPlayer && hasSegments)
+        ? visPlayer.segments[0].y - canvas.height / 2
+        : CFG.WORLD_H / 2 - canvas.height / 2;
+
+    // Final NaN guard (Extreme safety)
+    const safeCamX = isNaN(camX) ? 0 : camX;
+    const safeCamY = isNaN(camY) ? 0 : camY;
+
+    drawGrid(safeCamX, safeCamY);
+
+    foods.forEach(f => drawFood(f, safeCamX, safeCamY));
+
+    visualSnakes.forEach(s => {
+        if (s.segments && s.segments.length > 0) {
+            drawSnake(s, safeCamX, safeCamY);
+        }
+    });
+
+    if (mySnake && mySnake.alive) {
+        if (!mySnake.segments || mySnake.segments.length === 0) {
+            console.warn("WARNING: Player snake has NO segments in local state!");
+        }
+        document.getElementById('scoreDisplay').textContent = mySnake.score;
+        document.getElementById('lengthDisplay').textContent = mySnake.segments.length;
+
+        // Update Debug Overlay
+        document.getElementById('debugAOI').textContent = 1400; // From server CFG
+        document.getElementById('debugSectors').textContent = foodsBySector.size;
+        document.getElementById('debugTotalFood').textContent = foods.size;
+        document.getElementById('debugRoom').textContent = room ? room.roomId : 'N/A';
+        
+        // Calculate food in immediate AOI (screen-ish)
+        let aoiFoodCount = 0;
+        const head = mySnake.segments[0];
+        foods.forEach(f => {
+            const dx = f.x - head.x, dy = f.y - head.y;
+            if (dx*dx + dy*dy < 800*800) aoiFoodCount++;
+        });
+        document.getElementById('debugAOIFood').textContent = aoiFoodCount;
+    }
+
+    drawMinimap();
+    updateLeaderboard();
+}

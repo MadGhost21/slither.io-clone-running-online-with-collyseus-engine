@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>slitherclone.io — Neon Multiplayer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --neon-blue: #00f3ff;
+    --neon-deep: #0066ff;
+    --neon-green: #39ff14;
+    --neon-pink: #ff0090;
+    --neon-gold: #ffd700;
+    --bg-dark: #02060a;
+    --bg-panel: rgba(0,10,30,0.95);
+    --grid-color: rgba(0,243,255,0.04);
+    --border-glow: rgba(0,243,255,0.3);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-dark);
+    font-family: 'Rajdhani', sans-serif;
+    overflow: hidden;
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  #gameCanvas {
+    display: block;
+  }
+
+  /* ── MENU ── */
+  #menu {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #0a243d 0%, #02060a 100%);
+    z-index: 100;
+  }
+
+  #menu::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--grid-color) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridPulse 4s ease-in-out infinite;
+  }
+
+  @keyframes gridPulse {
+    0%,100% { opacity:.4 } 50% { opacity:1 }
+  }
+
+  .menu-content {
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 30px;
+    width: min(520px, 92vw);
+  }
+
+  .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(2.5rem, 8vw, 4.5rem);
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, var(--neon-blue), var(--neon-deep));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 20px rgba(0,243,255,0.8));
+    animation: logoPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes logoPulse {
+    0%,100% { filter: drop-shadow(0 0 20px rgba(0,243,255,0.8)) }
+    50% { filter: drop-shadow(0 0 40px rgba(0,102,255,0.9)) }
+  }
+
+  .logo span { color: var(--neon-blue); -webkit-text-fill-color: var(--neon-blue); text-shadow: 0 0 15px var(--neon-blue); }
+
+  .subtitle {
+    color: rgba(0,243,255,0.6);
+    font-size: 1rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-top: -20px;
+  }
+
+  /* name input */
+  .name-section {
+    width: 100%;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .name-section label {
+    color: var(--neon-blue);
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  #playerName {
+    width: 100%;
+    padding: 12px 18px;
+    background: rgba(0,243,255,0.05);
+    border: 1px solid var(--border-glow);
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.2rem;
+    outline: none;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  #playerName:focus {
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 15px rgba(0,243,255,0.3);
+  }
+
+  /* skins */
+  .skins-label {
+    align-self: flex-start;
+    color: var(--neon-blue);
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  .skins-grid {
+    display: flex; gap: 14px; width: 100%;
+    justify-content: center; flex-wrap: wrap;
+  }
+
+  .skin-card {
+    flex: 1; min-width: 120px; max-width: 150px;
+    padding: 14px 10px;
+    background: rgba(0,20,40,0.8);
+    border: 2px solid rgba(0,243,255,0.2);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 10px;
+  }
+
+  .skin-card:hover {
+    border-color: var(--neon-blue);
+    background: rgba(0,243,255,0.08);
+    transform: translateY(-4px);
+  }
+
+  .skin-card.active {
+    border-color: var(--neon-green);
+    box-shadow: 0 0 20px rgba(57,255,20,0.4), inset 0 0 20px rgba(57,255,20,0.05);
+  }
+
+  .skin-preview {
+    width: 80px; height: 30px;
+    border-radius: 15px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skin-name {
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+
+  /* buttons */
+  .btn-play {
+    width: 100%;
+    padding: 16px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--bg-dark);
+    background: linear-gradient(135deg, var(--neon-green), var(--neon-blue));
+    border: none; border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative; overflow: hidden;
+  }
+
+  .btn-play::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.3) 50%, transparent 70%);
+    transform: translateX(-100%);
+    transition: transform 0.5s;
+  }
+
+  .btn-play:hover::before { transform: translateX(100%); }
+  .btn-play:hover {
+    box-shadow: 0 0 30px rgba(57,255,20,0.7);
+    transform: scale(1.02);
+  }
+
+  .controls-hint {
+    color: rgba(255,255,255,0.3);
+    font-size: 0.8rem;
+    text-align: center;
+    letter-spacing: 0.1em;
+  }
+
+  /* ── HUD ── */
+  #hud {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 14px 20px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .hud-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-glow);
+    border-radius: 8px;
+    padding: 10px 16px;
+    backdrop-filter: blur(10px);
+  }
+
+  .hud-score {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--neon-blue);
+    text-shadow: 0 0 15px rgba(0,243,255,0.8);
+  }
+
+  .hud-label {
+    font-size: 0.7rem;
+    color: rgba(0,243,255,0.5);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  #leaderboard {
+    position: fixed;
+    top: 0; right: 0;
+    padding: 14px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .lb-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-glow);
+    border-radius: 8px;
+    padding: 12px 16px;
+    backdrop-filter: blur(10px);
+    min-width: 180px;
+  }
+
+  .lb-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    color: var(--neon-blue);
+    letter-spacing: 0.2em;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .lb-entry {
+    display: flex; justify-content: space-between;
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.7);
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .lb-entry.you { color: var(--neon-green); font-weight: 700; }
+  .lb-entry .lb-rank { color: rgba(255,255,255,0.3); margin-right: 6px; }
+
+  #minimap {
+    position: fixed;
+    top: 180px; right: 14px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  #minimapCanvas {
+    border: 1px solid var(--border-glow);
+    border-radius: 4px;
+    opacity: 0.8;
+  }
+
+  #boostIndicator {
+    position: fixed;
+    bottom: 14px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-glow);
+    border-radius: 30px;
+    padding: 8px 20px;
+    font-size: 0.8rem;
+    color: rgba(0,243,255,0.6);
+    letter-spacing: 0.15em;
+    z-index: 10;
+    pointer-events: none;
+    text-transform: uppercase;
+  }
+
+  /* ── DEATH SCREEN ── */
+  #deathScreen {
+    position: fixed; inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(5,10,15,0.92);
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .death-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(3rem, 10vw, 6rem);
+    font-weight: 900;
+    color: var(--neon-pink);
+    text-shadow: 0 0 40px rgba(255,0,144,0.9);
+    letter-spacing: 0.1em;
+    animation: deathPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes deathPulse {
+    0%,100% { text-shadow: 0 0 40px rgba(255,0,144,0.9) }
+    50% { text-shadow: 0 0 80px rgba(255,0,144,1), 0 0 120px rgba(255,0,144,0.5) }
+  }
+
+  .death-stats {
+    margin: 30px 0;
+    text-align: center;
+    color: rgba(255,255,255,0.7);
+    font-size: 1.1rem;
+    line-height: 2;
+  }
+
+  .death-stats strong {
+    color: var(--neon-blue);
+    font-family: 'Orbitron', sans-serif;
+  }
+
+  .btn-restart {
+    padding: 14px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #fff;
+    background: transparent;
+    border: 2px solid var(--neon-pink);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin: 8px;
+  }
+
+  .btn-restart:hover {
+    background: var(--neon-pink);
+    color: var(--bg-dark);
+    box-shadow: 0 0 30px rgba(255,0,144,0.7);
+  }
+
+  .btn-menu {
+    padding: 14px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    background: transparent;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin: 8px;
+  }
+
+  .btn-menu:hover {
+    border-color: rgba(255,255,255,0.6);
+    color: #fff;
+  }
+
+  /* DEBUG OVERLAY */
+  #debugOverlay {
+    position: fixed;
+    top: 100px; left: 20px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid var(--neon-blue);
+    padding: 10px;
+    color: var(--neon-blue);
+    font-family: 'monospace';
+    font-size: 0.8rem;
+    pointer-events: none;
+    z-index: 100;
+    border-radius: 4px;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Skin Studio */
+  #skinSelectionModal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(5px);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .studio-panel {
+    background: rgba(0,20,40,0.95);
+    border: 2px solid var(--neon-blue);
+    border-radius: 12px;
+    padding: 30px;
+    width: min(450px, 90vw);
+    display: flex; flex-direction: column; gap: 20px;
+    box-shadow: 0 0 30px rgba(0,243,255,0.2);
+  }
+  .studio-title {
+    color: #fff; font-size: 1.5rem; text-transform: uppercase;
+    text-align: center; letter-spacing: 0.1em;
+    text-shadow: 0 0 10px var(--neon-blue);
+  }
+  .studio-preview {
+    width: 100%; height: 50px;
+    border-radius: 25px;
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
+    background: #222;
+    position: relative;
+    overflow: hidden;
+  }
+  .studio-controls {
+    display: flex; gap: 10px; align-items: center;
+  }
+  input[type="color"] {
+    width: 50px; height: 50px;
+    padding: 0; border: none; border-radius: 8px;
+    cursor: pointer; background: transparent;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type="color"]::-webkit-color-swatch { border: 2px solid var(--neon-blue); border-radius: 8px; }
+  
+  .btn-add-color {
+    flex: 1; padding: 12px;
+    background: rgba(0,243,255,0.1);
+    border: 1px solid var(--neon-blue); color: var(--neon-blue);
+    border-radius: 6px; cursor: pointer; text-transform: uppercase;
+    transition: 0.2s;
+  }
+  .btn-add-color:hover { background: var(--neon-blue); color: #000; }
+  
+  .color-list {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    min-height: 40px; padding: 10px;
+    background: rgba(0,0,0,0.3); border-radius: 8px;
+  }
+  .color-swatch {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid #fff; cursor: pointer;
+  }
+  .studio-actions {
+    display: flex; gap: 10px; margin-top: 10px;
+  }
+  .btn-studio {
+    flex: 1; padding: 12px; font-weight: bold; text-transform: uppercase;
+    border: none; border-radius: 6px; cursor: pointer; transition: 0.2s;
+  }
+  .btn-save { background: var(--neon-green); color: #000; }
+  .btn-save:hover { box-shadow: 0 0 15px var(--neon-green); }
+  .btn-clear { background: transparent; border: 1px solid var(--neon-pink); color: var(--neon-pink); }
+  .btn-clear:hover { background: rgba(255,0,144,0.1); }
+  /* Mobile Controls */
+  #joystickZone {
+    position: fixed;
+    left: 20px; bottom: 20px;
+    width: 160px; height: 160px;
+    z-index: 50;
+    display: none;
+    touch-action: none;
+  }
+  #joystickBase {
+    position: absolute;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: rgba(0, 243, 255, 0.1);
+    border: 2px solid rgba(0, 243, 255, 0.3);
+    top: 10px; left: 10px;
+    pointer-events: none;
+  }
+  #joystickKnob {
+    position: absolute;
+    width: 50px; height: 50px;
+    border-radius: 50%;
+    background: var(--neon-blue);
+    top: 45px; left: 45px;
+    box-shadow: 0 0 15px var(--neon-blue);
+    transition: none;
+  }
+  #boostBtn {
+    position: fixed;
+    bottom: 40px; right: 40px;
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    background: rgba(57, 255, 20, 0.15);
+    border: 2px solid var(--neon-green);
+    color: var(--neon-green);
+    font-family: 'Orbitron', sans-serif;
+    font-weight: bold;
+    font-size: 0.9rem;
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 50;
+    touch-action: none;
+    user-select: none;
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.2);
+  }
+  #boostBtn.active {
+    background: rgba(57, 255, 20, 0.6);
+    color: #000;
+    transform: scale(0.95);
+    box-shadow: 0 0 40px rgba(57, 255, 20, 0.6);
+  }
+
+  .spinner {
+    width: 50px; height: 50px;
+    border: 5px solid rgba(0, 243, 255, 0.1);
+    border-top-color: var(--neon-blue);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- MOBILE CONTROLS -->
+<div id="joystickZone">
+  <div id="joystickBase"></div>
+  <div id="joystickKnob"></div>
+</div>
+<div id="boostBtn">BOOST</div>
+
+<!-- MENU -->
+<div id="menu">
+  <div class="menu-content">
+    <div class="logo">SlitherClone<span>.io</span></div>
+    <div class="subtitle">Online v10.1</div>
+
+    <div class="name-section">
+      <label>Your Name</label>
+      <input id="playerName" type="text" maxlength="16" placeholder="Enter nickname..." value="Player">
+    </div>
+
+    <button id="btnOpenSkinModal" class="btn-play" style="background: transparent; border: 2px solid var(--neon-blue); color: var(--neon-blue); margin-bottom: 10px; box-shadow: 0 0 10px rgba(0,243,255,0.2);">🎨 CHOOSE SKIN</button>
+
+    <button id="playBtn" class="btn-play">▶ PLAY NOW</button>
+    <div class="controls-hint">MOUSE to steer &nbsp;·&nbsp; CLICK or SPACE to boost</div>
+  </div>
+</div>
+
+<!-- SKIN STUDIO MODAL -->
+<div id="skinSelectionModal">
+  <div class="studio-panel" style="width: min(600px, 95vw); max-height: 90vh; overflow-y: auto;">
+    <div class="studio-title">Select Skin</div>
+    
+    <div class="skins-grid" style="margin-bottom: 10px;">
+      <div class="skin-card active" data-skin="neon-blue">
+        <div class="skin-preview" style="background: linear-gradient(90deg,#00f3ff,#0066ff);box-shadow:0 0 15px #00f3ff80"></div>
+        <span class="skin-name">Blue</span>
+      </div>
+      <div class="skin-card" data-skin="classic-green">
+        <div class="skin-preview" style="    background: linear-gradient(90deg, #00d2ff 0%, #3a7bd5 100%);box-shadow:0 0 15px #39ff1480"></div>
+        <span class="skin-name">Green</span>
+      </div>
+      <div class="skin-card" data-skin="neon-red">
+        <div class="skin-preview" style="background: linear-gradient(90deg,#ff003c,#990024);box-shadow:0 0 15px #ff003c80"></div>
+        <span class="skin-name">Red</span>
+      </div>
+      <div class="skin-card" data-skin="neon-gold">
+        <div class="skin-preview" style="background: linear-gradient(90deg,#ffd700,#b8860b);box-shadow:0 0 15px #ffd70080"></div>
+        <span class="skin-name">Gold</span>
+      </div>
+      <div class="skin-card" data-skin="neon-purple">
+        <div class="skin-preview" style="background: linear-gradient(90deg,#bf00ff,#660099);box-shadow:0 0 15px #bf00ff80"></div>
+        <span class="skin-name">Purple</span>
+      </div>
+    </div>
+
+    <div style="width:100%; height:1px; background: rgba(0,243,255,0.2); margin: 10px 0;"></div>
+
+    <div class="studio-title" style="font-size: 1.2rem;">Custom Studio</div>
+    <div class="studio-preview" id="studioPreview"></div>
+    <div class="studio-controls">
+      <input type="color" id="studioColor" value="#ff0090">
+      <button class="btn-add-color" id="btnAddColor">+ Add Color</button>
+    </div>
+    <div class="color-list" id="studioColorList">
+      <!-- Swatches go here -->
+    </div>
+    <div class="studio-actions">
+      <button class="btn-studio btn-clear" id="btnStudioClear">Clear Custom</button>
+      <button class="btn-studio btn-save" id="btnStudioSave">Save & Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- DEBUG OVERLAY -->
+<div id="debugOverlay" style="display:none">
+    <div style="color:var(--neon-pink); font-weight:bold; margin-bottom:5px;">Performance</div>
+    <div>FPS: <span id="debugFPS">0</span></div>
+    <div>TPS (Engine): <span id="debugTPS">0</span></div>
+    <div>Ping: <span id="debugPing">0</span>ms</div>
+    <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:5px; color:rgba(255,255,255,0.5)">Engine Info</div>
+    <div>AOI Radius: <span id="debugAOI">0</span>px</div>
+    <div>Visible Sectors: <span id="debugSectors">0</span></div>
+    <div>Total Food (State): <span id="debugTotalFood">0</span></div>
+    <div>Food in AOI: <span id="debugAOIFood">0</span></div>
+    <div>Room ID: <span id="debugRoom">N/A</span></div>
+    <div>My ID: <span id="debugSession" style="font-size:0.7rem; color:rgba(255,255,255,0.5)">N/A</span></div>
+</div>
+
+<!-- HUD -->
+<div id="hud" style="display:none">
+  <div class="hud-panel">
+    <div class="hud-label">Score</div>
+    <div class="hud-score" id="scoreDisplay">0</div>
+  </div>
+  <div class="hud-panel" style="text-align:right">
+    <div class="hud-label">Length</div>
+    <div class="hud-score" id="lengthDisplay">10</div>
+  </div>
+</div>
+
+<div id="leaderboard" style="display:none">
+  <div class="lb-panel">
+    <div class="lb-title">🏆 Leaderboard</div>
+    <div id="lbEntries"></div>
+  </div>
+</div>
+
+<!-- CHAT UI -->
+<div id="chatButton" style="display:none; position:fixed; top:20px; left:140px; z-index:100; pointer-events:auto; background:rgba(0,243,255,0.15); border:1px solid var(--neon-blue); border-radius:50%; width:48px; height:48px; cursor:pointer; align-items:center; justify-content:center; box-shadow:0 0 20px rgba(0,243,255,0.3); backdrop-filter:blur(8px);">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--neon-blue)"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+  <div id="chatNotify" style="display:none; position:absolute; top:2px; right:2px; width:12px; height:12px; background:#ff003c; border-radius:50%; border:2px solid #050f19; box-shadow:0 0 10px #ff003c;"></div>
+</div>
+
+<div id="chatPanel" style="display:none; position:fixed; bottom:120px; left:20px; width:min(320px, 85vw); height:300px; background:rgba(5,15,25,0.92); border:1px solid var(--neon-blue); border-radius:12px; z-index:100; backdrop-filter:blur(15px); flex-direction:column; overflow:hidden; box-shadow: 0 0 30px rgba(0,243,255,0.2);">
+  <div style="padding:12px; background:rgba(0,243,255,0.1); border-bottom:1px solid rgba(0,243,255,0.2); font-weight:bold; color:var(--neon-blue); display:flex; justify-content:space-between; align-items:center; font-family:'Orbitron',sans-serif; font-size:0.8rem; letter-spacing:0.1em;">
+      <span>GLOBAL CHAT</span>
+      <span id="closeChat" style="cursor:pointer; opacity:0.6; font-size:1.5rem;">×</span>
+  </div>
+  <div id="chatMessages" style="flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; font-size:0.9rem;">
+      <!-- Messages go here -->
+  </div>
+  <div style="padding:10px; display:flex; gap:8px; background:rgba(0,0,0,0.3);">
+      <input id="chatInput" type="text" placeholder="Type message..." maxlength="80" style="flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(0,243,255,0.2); border-radius:6px; padding:10px; color:white; outline:none; font-family:'Rajdhani',sans-serif;">
+      <button id="sendChat" style="background:var(--neon-blue); border:none; border-radius:6px; padding:0 14px; cursor:pointer; transition:0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
+  </div>
+</div>
+
+<div id="minimap" style="display:none">
+  <canvas id="minimapCanvas" width="120" height="120"></canvas>
+</div>
+
+<div id="boostIndicator" style="display:none">
+  HOLD CLICK / SPACE to BOOST
+</div>
+
+<!-- DEATH SCREEN -->
+<div id="deathScreen">
+  <div class="death-title">ELIMINATED</div>
+  <div class="death-stats" id="deathStats"></div>
+  <div>
+    <button id="restartBtn" class="btn-restart">↺ PLAY AGAIN</button>
+    <button id="menuBtn" class="btn-menu">⌂ MENU</button>
+  </div>
+</div>
+
+<!-- DISCONNECT OVERLAY -->
+<div id="disconnectOverlay" style="display:none; position:fixed; inset:0; flex-direction:column; align-items:center; justify-content:center; background:rgba(0,0,0,0.7); z-index:900; backdrop-filter:blur(10px);">
+  <div style="background:rgba(5,15,25,0.95); border:2px solid #ff003c; border-radius:12px; padding:40px; width:min(400px, 90vw); text-align:center; box-shadow:0 0 50px rgba(255,0,60,0.3);">
+    <div style="font-family:'Orbitron',sans-serif; font-size:2rem; font-weight:900; color:#ff003c; text-shadow:0 0 20px rgba(255,0,60,0.5); margin-bottom:15px; letter-spacing:0.1em;">CONNECTION LOST</div>
+    <div style="color:rgba(255,255,255,0.7); margin-bottom:30px; font-size:1.1rem; line-height:1.4;">The connection to the Slither Engine was interrupted.</div>
+    <button class="btn-play" style="border-color:#ff003c; color:#ff003c; background:transparent; width:100%; box-shadow:0 0 15px rgba(255,0,60,0.2);" onmouseover="this.style.background='rgba(255,0,60,0.1)';" onmouseout="this.style.background='transparent';" onclick="location.reload()">RECONNECT NOW</button>
+  </div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div id="loadingOverlay" style="display:none; position:fixed; inset:0; flex-direction:column; align-items:center; justify-content:center; background:rgba(5,10,15,0.92); z-index:300; backdrop-filter:blur(8px);">
+  <div class="spinner"></div>
+  <div class="death-title" style="font-size: 2rem; margin-top: 20px; color: var(--neon-blue); text-shadow: 0 0 20px var(--neon-blue);">INITIALIZING...</div>
+  <div class="death-stats" style="font-size: 0.9rem; color: rgba(255,255,255,0.5);">Synchronizing with Slither Engine</div>
+</div>
+
+<!-- CANVAS -->
+<canvas id="gameCanvas"></canvas>
+
+<script>
+  // Real functional Polyfill for Buffer (required by msgpackr inside colyseus.js)
+  (function() {
+    function Buffer(arg) { return new Uint8Array(arg); }
+    Buffer.prototype = Object.create(Uint8Array.prototype);
+    Buffer.prototype.constructor = Buffer;
+    Buffer.isBuffer = function(b) { return b instanceof Uint8Array; };
+    Buffer.from = function(data) { return new Uint8Array(data); };
+    Buffer.alloc = function(size) { return new Uint8Array(size); };
+    Buffer.allocUnsafe = Buffer.alloc;
+    Buffer.allocUnsafeSlow = Buffer.alloc;
+    // Add dummy utf8Write to prevent the specific crash in msgpackr
+    Buffer.prototype.utf8Write = function() { return 0; };
+    
+    if (typeof window.Buffer === "undefined") window.Buffer = Buffer;
+    if (typeof window.process === "undefined") window.process = { env: { NODE_ENV: 'production' } };
+    if (typeof window.global === "undefined") window.global = window;
+  })();
+</script>
+<script src="lib/colyseus.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

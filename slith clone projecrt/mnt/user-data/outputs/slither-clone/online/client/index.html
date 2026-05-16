@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slither.io Clone — Online (Colyseus)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --neon-blue: #00f3ff;
+    --neon-green: #39ff14;
+    --neon-pink: #ff0090;
+    --bg-dark: #050a0f;
+    --bg-panel: rgba(0,20,40,0.92);
+    --border-glow: rgba(0,243,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg-dark); font-family:'Rajdhani',sans-serif; overflow:hidden; }
+
+  #gameCanvas { display:block; cursor:none; }
+
+  #menu {
+    position:fixed; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at center,#061828 0%,#020810 100%);
+    z-index:100;
+  }
+  #menu::before {
+    content:''; position:absolute; inset:0;
+    background-image:linear-gradient(rgba(0,243,255,0.04) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(0,243,255,0.04) 1px,transparent 1px);
+    background-size:40px 40px;
+  }
+
+  .menu-content {
+    position:relative; z-index:2;
+    display:flex; flex-direction:column; align-items:center; gap:24px;
+    width:min(500px,92vw);
+  }
+
+  .logo {
+    font-family:'Orbitron',sans-serif;
+    font-size:clamp(2rem,7vw,4rem); font-weight:900;
+    background:linear-gradient(135deg,var(--neon-blue),var(--neon-green));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 20px rgba(0,243,255,0.8));
+  }
+
+  .mode-badge {
+    background:rgba(57,255,20,0.15); border:1px solid var(--neon-green);
+    border-radius:20px; padding:4px 14px;
+    color:var(--neon-green); font-size:0.8rem; letter-spacing:0.2em;
+    margin-top:-16px;
+  }
+
+  .field-group { width:100%; display:flex; flex-direction:column; gap:6px; }
+  .field-group label { color:var(--neon-blue); font-size:0.8rem; letter-spacing:0.2em; text-transform:uppercase; }
+
+  input[type=text] {
+    width:100%; padding:12px 16px;
+    background:rgba(0,243,255,0.05); border:1px solid var(--border-glow);
+    border-radius:4px; color:#fff; font-family:'Rajdhani',sans-serif; font-size:1.1rem;
+    outline:none; transition:border-color 0.3s,box-shadow 0.3s;
+  }
+  input[type=text]:focus { border-color:var(--neon-blue); box-shadow:0 0 15px rgba(0,243,255,0.3); }
+
+  .skins-row { display:flex; gap:10px; width:100%; }
+
+  .skin-card {
+    flex:1; padding:12px 8px; cursor:pointer;
+    background:rgba(0,20,40,0.8); border:2px solid rgba(0,243,255,0.2);
+    border-radius:8px; transition:all 0.3s;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+  }
+  .skin-card:hover { border-color:var(--neon-blue); transform:translateY(-3px); }
+  .skin-card.active { border-color:var(--neon-green); box-shadow:0 0 20px rgba(57,255,20,0.4); }
+
+  .skin-preview { width:70px; height:26px; border-radius:13px; }
+  .skin-name { color:#fff; font-size:0.78rem; text-align:center; }
+
+  #connectionStatus {
+    width:100%; padding:10px 14px;
+    border-radius:6px; font-size:0.9rem; text-align:center;
+    letter-spacing:0.1em; transition:all 0.4s;
+  }
+  .status-connecting { background:rgba(255,166,0,0.1); border:1px solid orange; color:orange; }
+  .status-connected  { background:rgba(57,255,20,0.1);  border:1px solid var(--neon-green); color:var(--neon-green); }
+  .status-error      { background:rgba(255,0,0,0.1);    border:1px solid #ff4444; color:#ff4444; }
+
+  .btn-play {
+    width:100%; padding:15px;
+    font-family:'Orbitron',sans-serif; font-size:1.1rem; font-weight:700;
+    letter-spacing:0.2em; text-transform:uppercase;
+    color:var(--bg-dark); background:linear-gradient(135deg,var(--neon-green),var(--neon-blue));
+    border:none; border-radius:6px; cursor:pointer; transition:all 0.3s;
+  }
+  .btn-play:disabled { opacity:0.4; cursor:not-allowed; }
+  .btn-play:not(:disabled):hover { box-shadow:0 0 30px rgba(57,255,20,0.7); transform:scale(1.02); }
+
+  #hud {
+    position:fixed; top:0; left:0; right:0; padding:14px 20px;
+    display:none; justify-content:space-between; align-items:flex-start;
+    pointer-events:none; z-index:10;
+  }
+
+  .hud-panel {
+    background:var(--bg-panel); border:1px solid var(--border-glow);
+    border-radius:8px; padding:10px 16px; backdrop-filter:blur(10px);
+  }
+
+  .hud-score {
+    font-family:'Orbitron',sans-serif; font-size:1.3rem; font-weight:700;
+    color:var(--neon-blue); text-shadow:0 0 15px rgba(0,243,255,0.8);
+  }
+
+  .hud-label { font-size:0.7rem; color:rgba(0,243,255,0.5); letter-spacing:0.2em; text-transform:uppercase; }
+
+  #leaderboard { position:fixed; top:14px; right:14px; z-index:10; pointer-events:none; }
+  .lb-panel {
+    background:var(--bg-panel); border:1px solid var(--border-glow);
+    border-radius:8px; padding:12px 16px; backdrop-filter:blur(10px); min-width:180px;
+  }
+  .lb-title { font-family:'Orbitron',sans-serif; font-size:0.7rem; color:var(--neon-blue); letter-spacing:0.2em; margin-bottom:8px; }
+  .lb-entry { display:flex; justify-content:space-between; font-size:0.9rem; color:rgba(255,255,255,0.7); padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+  .lb-entry.you { color:var(--neon-green); font-weight:700; }
+  .lb-rank { color:rgba(255,255,255,0.3); margin-right:6px; }
+
+  #minimap { position:fixed; bottom:14px; right:14px; z-index:10; pointer-events:none; }
+  #minimapCanvas { border:1px solid var(--border-glow); border-radius:4px; opacity:0.8; }
+
+  #ping {
+    position:fixed; bottom:14px; left:14px;
+    background:var(--bg-panel); border:1px solid var(--border-glow);
+    border-radius:6px; padding:6px 14px;
+    font-size:0.8rem; color:rgba(0,243,255,0.6); letter-spacing:0.1em;
+    z-index:10; pointer-events:none;
+  }
+
+  #deathScreen {
+    position:fixed; inset:0; display:none;
+    flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(5,10,15,0.92); z-index:100; backdrop-filter:blur(8px);
+  }
+
+  .death-title {
+    font-family:'Orbitron',sans-serif;
+    font-size:clamp(3rem,10vw,6rem); font-weight:900;
+    color:var(--neon-pink);
+    text-shadow:0 0 40px rgba(255,0,144,0.9);
+    animation:deathPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes deathPulse {
+    0%,100% { text-shadow:0 0 40px rgba(255,0,144,0.9) }
+    50%      { text-shadow:0 0 80px rgba(255,0,144,1),0 0 120px rgba(255,0,144,0.5) }
+  }
+
+  .death-stats { margin:30px 0; text-align:center; color:rgba(255,255,255,0.7); font-size:1.1rem; line-height:2.2; }
+  .death-stats strong { color:var(--neon-blue); font-family:'Orbitron',sans-serif; }
+
+  .btn-restart {
+    padding:13px 36px; font-family:'Orbitron',sans-serif; font-size:0.95rem;
+    font-weight:700; letter-spacing:0.2em; text-transform:uppercase;
+    color:#fff; background:transparent; border:2px solid var(--neon-pink);
+    border-radius:4px; cursor:pointer; transition:all 0.3s; margin:6px;
+  }
+  .btn-restart:hover { background:var(--neon-pink); color:var(--bg-dark); box-shadow:0 0 30px rgba(255,0,144,0.7); }
+
+  .btn-menu {
+    padding:13px 36px; font-family:'Orbitron',sans-serif; font-size:0.95rem;
+    font-weight:700; letter-spacing:0.2em; color:rgba(255,255,255,0.5);
+    background:transparent; border:2px solid rgba(255,255,255,0.2);
+    border-radius:4px; cursor:pointer; transition:all 0.3s; margin:6px;
+  }
+  .btn-menu:hover { border-color:rgba(255,255,255,0.6); color:#fff; }
+</style>
+</head>
+<body>
+
+<!-- MENU -->
+<div id="menu">
+  <div class="menu-content">
+    <div class="logo">Slither Online</div>
+    <div class="mode-badge">● MULTIPLAYER</div>
+
+    <div id="connectionStatus" class="status-connecting">Connecting to server...</div>
+
+    <div class="field-group">
+      <label>Your Name</label>
+      <input id="playerName" type="text" maxlength="16" placeholder="Enter nickname..." value="Player">
+    </div>
+
+    <div class="field-group">
+      <label>Server URL</label>
+      <input id="serverUrl" type="text" value="ws://localhost:2567" placeholder="ws://your-server:2567">
+    </div>
+
+    <div class="field-group">
+      <label>Choose Skin</label>
+      <div class="skins-row">
+        <div class="skin-card active" data-skin="neon-blue" onclick="selectSkin(this,'neon-blue')">
+          <div class="skin-preview" style="background:linear-gradient(90deg,#00f3ff,#0066ff);box-shadow:0 0 12px #00f3ff80"></div>
+          <span class="skin-name">Neon Blue</span>
+        </div>
+        <div class="skin-card" data-skin="classic-green" onclick="selectSkin(this,'classic-green')">
+          <div class="skin-preview" style="background:linear-gradient(90deg,#39ff14,#00aa00);box-shadow:0 0 12px #39ff1480"></div>
+          <span class="skin-name">Classic Green</span>
+        </div>
+        <div class="skin-card" data-skin="striped" onclick="selectSkin(this,'striped')">
+          <div class="skin-preview" style="background:repeating-linear-gradient(90deg,#ff0090 0,#ff0090 10px,#ff6600 10px,#ff6600 20px);box-shadow:0 0 12px #ff009080"></div>
+          <span class="skin-name">Striped</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-play" id="playBtn" onclick="startGame()" disabled>
+      ▶ JOIN GAME
+    </button>
+    <div style="color:rgba(255,255,255,0.3);font-size:0.78rem;text-align:center;letter-spacing:0.1em">
+      MOUSE to steer &nbsp;·&nbsp; CLICK or SPACE to boost
+    </div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-panel">
+    <div class="hud-label">Score</div>
+    <div class="hud-score" id="scoreDisplay">0</div>
+  </div>
+  <div class="hud-panel">
+    <div class="hud-label">Players Online</div>
+    <div class="hud-score" id="onlineCount">1</div>
+  </div>
+</div>
+
+<div id="leaderboard" style="display:none">
+  <div class="lb-panel">
+    <div class="lb-title">🏆 Leaderboard</div>
+    <div id="lbEntries"></div>
+  </div>
+</div>
+
+<div id="minimap" style="display:none">
+  <canvas id="minimapCanvas" width="120" height="120"></canvas>
+</div>
+
+<div id="ping" style="display:none">Ping: <span id="pingMs">--</span> ms</div>
+
+<!-- DEATH SCREEN -->
+<div id="deathScreen">
+  <div class="death-title">ELIMINATED</div>
+  <div class="death-stats" id="deathStats"></div>
+  <div>
+    <button class="btn-restart" onclick="rejoinGame()">↺ PLAY AGAIN</button>
+    <button class="btn-menu" onclick="showMenu()">⌂ MENU</button>
+  </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script src="https://unpkg.com/colyseus.js@^0.15.0/dist/colyseus.js"></script>
+<script src="game-client.js"></script>
+</body>
+</html>
